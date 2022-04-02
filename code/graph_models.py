@@ -6,7 +6,8 @@ import numpy as np
 
 import inspect
 
-from torch_geometric.utils import scatter_, softmax, add_self_loops
+from torch_geometric.utils import softmax, add_self_loops
+from torch_scatter import scatter
 from torch_geometric.nn.inits import glorot, zeros, uniform
 
 from build_tree import build_stage_one_edges, build_stage_two_edges, build_cominbed_edges
@@ -114,7 +115,7 @@ class MessagePassing(nn.Module):
         update_args = [kwargs[arg] for arg in self.update_args]
 
         out = self.message(*message_args)
-        out = scatter_(aggr, out, edge_index[0], dim_size=size)
+        out = scatter(aggr, out, edge_index[0], dim_size=size)
         out = self.update(out, *update_args)
 
         return out
@@ -219,7 +220,7 @@ class GATConv(MessagePassing):
 
     def message(self, x_i, x_j, edge_index, num_nodes):
         # Compute attention coefficients.
-        alpha = (torch.cat([x_i, x_j], dim=-1) * self.att).sum(dim=-1)
+        alpha = (torch.cat((x_i, x_j), dim=-1) * self.att).sum(dim=-1)
         alpha = F.leaky_relu(alpha, self.negative_slope)
         alpha = softmax(alpha, edge_index[0], num_nodes)
 
