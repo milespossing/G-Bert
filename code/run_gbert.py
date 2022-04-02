@@ -330,7 +330,7 @@ def main():
     if args.use_pretrain:
         logger.info("Use Pretraining model")
         model = GBERT_Predict.from_pretrained(
-            args.pretrain_dir, tokenizer=tokenizer)
+            args.pretrain_dir, device=device, tokenizer=tokenizer)
     else:
         config = BertConfig(
             vocab_size_or_config_json_file=len(tokenizer.vocab.word2idx))
@@ -455,7 +455,7 @@ def main():
 
         def test(task=0):
             # Load a trained model that you have fine-tuned
-            model_state_dict = torch.load(rx_output_model_file)
+            model_state_dict = torch.load(rx_output_model_file, map_location=device)
             model.load_state_dict(model_state_dict)
             model.to(device)
 
