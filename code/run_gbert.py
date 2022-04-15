@@ -165,7 +165,7 @@ class EHRDataset(Dataset):
                 map(lambda x: self.tokenizer.rx_voc_multi.word2idx[x], tokens))] = 1
             output_rx_labels.append(tmp_labels)
 
-        if cur_id < 5:
+        if cur_id < 5 and False:
             logger.info("*** Example ***")
             logger.info("subject_id: %s" % subject_id)
             logger.info("input tokens: %s" % " ".join(

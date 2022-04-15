@@ -160,7 +160,7 @@ class EHRDataset(Dataset):
         """
         input_ids = self.tokenizer.convert_tokens_to_ids(input_tokens)
 
-        if cur_id < 5:
+        if cur_id < 5 and False:
             logger.info("*** Example ***")
             logger.info("input tokens: %s" % " ".join(
                 [str(x) for x in input_tokens]))
