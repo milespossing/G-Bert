@@ -1,13 +1,54 @@
 # G-Bert
+
+Originally forked from [this repository](https://github.com/jshang123/G-Bert). Please show them appreciation and be sure to cite them in any published work:
+
+```latex
+@article{shang2019pre,
+  title={Pre-training of Graph Augmented Transformers for Medication Recommendation},
+  author={Shang, Junyuan and Ma, Tengfei and Xiao, Cao and Sun, Jimeng},
+  journal={arXiv preprint arXiv:1906.00346},
+  year={2019}
+}
+```
+
 Pre-training of Graph Augmented Transformers for Medication Recommendation
 
 ## Intro
 G-Bert combined the power of **G**raph Neural Networks and **BERT** (Bidirectional Encoder Representations from Transformers) for medical code representation and medication recommendation. We use the graph neural networks (GNNs) to represent the structure information of medical codes from a medical ontology. Then we integrate the GNN representation into a transformer-based visit encoder and pre-train it on single-visit EHR data. The pre-trained visit encoder and representation can be fine-tuned for downstream medical prediction tasks. Our model is the first to bring the language model pre-training schema into the healthcare domain and it achieved state-of-the-art performance on the medication recommendation task.
 
 ## Requirements
-- pytorch>=0.4
-- python>=3.5
-- torch_geometric==1.0.3
+- pytorch
+- python
+- torch_geometric
+
+## Running
+
+A docker file is provided to build an image which can be used to run all code in this repository. The file can be built
+locally, or the image is also hosted on docker hub as `mpossing/dlh-final:latest`. Instructions on building or retrieving
+the image are below:
+
+```bash
+# to build locally
+docker build -t dlh-final:latest .
+# to pull from docker hub
+docker pull mpossing/dlh-final:latest
+```
+
+**Next instructions specific to the draft *only***. Some run commands are omitted as we have yet to finish some portions
+of the code.
+
+In order to run the pretrain step simply run the following command from the root of the repository
+
+```bash
+# Pretraining———for unix environments
+docker run --rm -v $(pwd):/opt/project --gpus all -w /opt/project/code mpossing/dlh-final:latest \
+  python run_pretraining.py --model_name local --pretrain_dir ../saved/local --num_train_epochs 5 --do_train
+
+# G-Bert———for unix environments
+docker run --rm -v $(pwd):/opt/project --gpus all -w /opt/project/code mpossing/dlh-final:latest \
+  python run_gbert.py --model_name local --pretrain_dir ../saved/local --num_train_epochs 5 --use_pretrain \
+  --do_train --do_eval --do_test
+```
 
 ## Guide
 We list the structure of this repo as follows:
