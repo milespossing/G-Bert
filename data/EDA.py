@@ -373,7 +373,7 @@ def split_dataset(data_path='data-multi-visit.pkl'):
     sample_id = data['SUBJECT_ID'].unique()
 
     random_number = [i for i in range(len(sample_id))]
-#     shuffle(random_number)
+#     shuffle(random_number)  # todo: figure out if this is legit
 
     train_id = sample_id[random_number[:int(len(sample_id)*2/3)]]
     eval_id = sample_id[random_number[int(
