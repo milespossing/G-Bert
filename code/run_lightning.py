@@ -68,6 +68,15 @@ class EHRTokenizer(object):
 
         self.rx_voc = self.add_vocab(os.path.join(data_dir, 'rx-vocab.txt'))
         self.dx_voc = self.add_vocab(os.path.join(data_dir, 'dx-vocab.txt'))
+        # code only in multi-visit data
+        self.rx_voc_multi = Voc()
+        self.dx_voc_multi = Voc()
+        with open(os.path.join(data_dir, 'rx-vocab-multi.txt'), 'r') as fin:
+            for code in fin:
+                self.rx_voc_multi.add_sentence([code.rstrip('\n')])
+        with open(os.path.join(data_dir, 'dx-vocab-multi.txt'), 'r') as fin:
+            for code in fin:
+                self.dx_voc_multi.add_sentence([code.rstrip('\n')])
 
     def add_vocab(self, vocab_file):
         voc = self.vocab
@@ -205,7 +214,7 @@ def load_dataset(args):
            EHRDataset(load_ids(data_multi, ids_file[1]), tokenizer, max_seq_len), \
            EHRDataset(load_ids(data_multi, ids_file[2]), tokenizer, max_seq_len)
 
-if __name__ == '__main__':
+def parse_arguments():
     parser = argparse.ArgumentParser()
 
     # Required parameters
@@ -284,7 +293,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     args.output_dir = os.path.join(args.output_dir, args.model_name)
+    return args
 
+if __name__ == '__main__':
+    args = parse_arguments()
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -299,7 +311,8 @@ if __name__ == '__main__':
                                   num_workers=12)
     eval_dataloader = DataLoader(eval_dataset,
                                  sampler=SequentialSampler(eval_dataset),
-                                 batch_size=args.batch_size)
+                                 batch_size=args.batch_size,
+                                 num_workers=12)
     test_dataloader = DataLoader(test_dataset,
                                  sampler=SequentialSampler(test_dataset),
                                  batch_size=args.batch_size)
@@ -309,13 +322,15 @@ if __name__ == '__main__':
     config = BertConfig(
         vocab_size_or_config_json_file=len(tokenizer.vocab.word2idx))
     config.graph = args.graph
-    model = LitBert(config, tokenizer.dx_voc, tokenizer.rx_voc, args.learning_rate)
+    model = LitBert(config, tokenizer, args.learning_rate)
 
     # TODO: Save the model here
 
     trainer = pl.Trainer(
-        accelerator='gpu',
+        accelerator='cpu' if args.no_cuda else 'gpu',
         max_epochs=args.num_train_epochs,
         default_root_dir='../saved/lightning')
-    trainer.fit(model, train_dataloader)
+    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=eval_dataloader)
+    model.logger.save()
+
     print('done')
