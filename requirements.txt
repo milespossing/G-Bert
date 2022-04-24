@@ -2,3 +2,5 @@ pytorch-lightning
 dill
 tensorboardX
 tqdm
+tensorboard
+jupyter
