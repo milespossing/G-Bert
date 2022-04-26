@@ -15,7 +15,8 @@ import pytorch_lightning as pl
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler, Dataset
 
 from config import BertConfig
-from bert_lightning import LitBert
+from bert_lightning import LitPretrain
+from lightning_data_module import EHRDataModule
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
@@ -183,8 +184,8 @@ def load_dataset(args):
     tokenizer = EHRTokenizer(data_dir)
 
     # load data
-    data_multi = pd.read_pickle(os.path.join(
-        data_dir, 'data-multi-visit.pkl')).iloc[:, :4]
+    data = pd.read_pickle(os.path.join(data_dir, 'data-multi-visit.pkl'))
+    data_multi = data.iloc[:, :4]
     data_single = pd.read_pickle(
         os.path.join(data_dir, 'data-single-visit.pkl'))
 
@@ -212,7 +213,7 @@ def load_dataset(args):
            EHRDataset(pd.concat([data_single, load_ids(
                data_multi, ids_file[0])]), tokenizer, max_seq_len), \
            EHRDataset(load_ids(data_multi, ids_file[1]), tokenizer, max_seq_len), \
-           EHRDataset(load_ids(data_multi, ids_file[2]), tokenizer, max_seq_len)
+           EHRDataset(load_ids(      data, ids_file[2]), tokenizer, max_seq_len)
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -304,25 +305,20 @@ if __name__ == '__main__':
     os.makedirs(args.output_dir, exist_ok=True)
 
     print("Loading Dataset")
-    tokenizer, train_dataset, eval_dataset, test_dataset = load_dataset(args)
-    train_dataloader = DataLoader(train_dataset,
-                                  sampler=RandomSampler(train_dataset),
-                                  batch_size=args.batch_size,
-                                  num_workers=12)
-    eval_dataloader = DataLoader(eval_dataset,
-                                 sampler=SequentialSampler(eval_dataset),
-                                 batch_size=args.batch_size,
-                                 num_workers=12)
-    test_dataloader = DataLoader(test_dataset,
-                                 sampler=SequentialSampler(test_dataset),
-                                 batch_size=args.batch_size)
+    ehr_data_pretrain = EHRDataModule(is_pretrain=True, data_dir='../data', batch_size=64)
+    ehr_data_train = EHRDataModule(is_pretrain=False, data_dir='../data', batch_size=64)
+    ehr_data_pretrain.setup()
+    ehr_data_train.setup()
+    tokenizer = ehr_data_pretrain.tokenizer
+    train_dataloader = ehr_data_pretrain.train_dataloader()
+    val_dataloader = ehr_data_pretrain.val_dataloader()
 
     # TODO: Load the model here
 
     config = BertConfig(
         vocab_size_or_config_json_file=len(tokenizer.vocab.word2idx))
     config.graph = args.graph
-    model = LitBert(config, tokenizer, args.learning_rate)
+    model = LitPretrain(config, tokenizer, args.learning_rate)
 
     # TODO: Save the model here
 
@@ -330,7 +326,8 @@ if __name__ == '__main__':
         accelerator='cpu' if args.no_cuda else 'gpu',
         max_epochs=args.num_train_epochs,
         default_root_dir='../saved/lightning')
-    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=eval_dataloader)
+    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
+    trainer.test(model, dataloaders=test_dataloader)
     model.logger.save()
 
     print('done')
