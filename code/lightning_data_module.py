@@ -75,7 +75,6 @@ class EHRDatasetTemplate(Dataset):
         self.data_pd = data_pd
         self.tokenizer = tokenizer
         self.seq_len = max_seq_len
-        self.sample_counter = 0
         self.data = self.__transform_data__(data_pd)
 
     @classmethod
@@ -113,7 +112,6 @@ class DatasetPretrain(EHRDatasetTemplate):
         return admissions
 
     def __getitem__(self, item):
-        cur_id = item
         adm = copy.deepcopy(self.data[item])
 
         def fill_to_max(l, seq):
@@ -205,8 +203,6 @@ class DatasetPrediction(EHRDatasetTemplate):
         return records
 
     def __getitem__(self, item):
-        cur_id = self.sample_counter  # todo: ?
-        self.sample_counter += 1
         subject_id = list(self.data.keys())[item]
 
         def fill_to_max(l, seq):
@@ -261,9 +257,9 @@ class DatasetPrediction(EHRDatasetTemplate):
         #                 " ".join([str(x) for x in input_ids]))
 
         # todo: move assertion out of the loop
-        assert len(input_ids) == (self.seq_len *
-                                  2 * len(self.data[subject_id]))
-        assert len(output_dx_labels) == (len(self.data[subject_id]) - 1)
+        # assert len(input_ids) == (self.seq_len *
+        #                           2 * len(self.data[subject_id]))
+        # assert len(output_dx_labels) == (len(self.data[subject_id]) - 1)
         # assert len(output_rx_labels) == len(self.records[subject_id])-1
 
         cur_tensors = (torch.tensor(input_ids).view(-1, self.seq_len),
@@ -280,7 +276,7 @@ class EHRDataModule(pl.LightningDataModule):
         self.data_dir = data_dir
         self.max_seq_len = max_seq_len
         self.is_pretrain = is_pretrain
-        self.batch_size = batch_size
+        self.batch_size = batch_size if is_pretrain else 1
         # load tokenizer
         self.tokenizer = Tokenizer(self.data_dir, self.is_pretrain)
 
@@ -320,7 +316,7 @@ class EHRDataModule(pl.LightningDataModule):
                 tuple(map(lambda x: DatasetPrediction(load_ids(data_multi, x), self.tokenizer, self.max_seq_len), ids_file))
         pass
 
-    def train_dataloader(self, num_workers=1):
+    def train_dataloader(self, num_workers=6):
         return DataLoader(self.train_dataset,
                           sampler=RandomSampler(self.train_dataset),
                           batch_size=self.batch_size, num_workers=num_workers)
@@ -339,8 +335,8 @@ class EHRDataModule(pl.LightningDataModule):
 
 
 if __name__ == '__main__':
-    for pretrain in [True, False]:
-        ehr_data = EHRDataModule(is_pretrain=pretrain, data_dir='../data', batch_size=1)
+    for pretrain in [False, True]:
+        ehr_data = EHRDataModule(is_pretrain=pretrain, data_dir='../data', batch_size=64)
         ehr_data.setup()
         _train = iter(ehr_data.train_dataloader())
         next(_train)
@@ -348,4 +344,5 @@ if __name__ == '__main__':
         next(_val)
         _test = iter(ehr_data.test_dataloader())
         next(_test)
+        del ehr_data, _train, _val, _test
     print('all is well')
