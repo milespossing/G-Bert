@@ -337,9 +337,6 @@ class EHRDataModule(pl.LightningDataModule):
                           batch_size=self.batch_size,
                           num_workers=num_workers)
 
-    # def predict_dataloader(self):
-    #     return DataLoader(self.ehr_predict, batch_size=32)
-
 
 if __name__ == '__main__':
     for pretrain in [True, False]:

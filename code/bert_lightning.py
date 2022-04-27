@@ -42,6 +42,11 @@ class LitBert(pl.LightningModule):
     def __init__(self, config: BertConfig, tokenizer, learning_rate):
         super().__init__()
         self.learning_rate = learning_rate
+        self.dense = nn.ModuleList([MappingHead(config), MappingHead(config)])
+        self.cls = SelfSupervisedHead(config, len(tokenizer.dx_voc.word2idx), len(tokenizer.rx_voc.word2idx))
+        self.cls_test = nn.Sequential(nn.Linear(3*config.hidden_size, 2*config.hidden_size),
+                                      nn.ReLU(),
+                                      nn.Linear(2*config.hidden_size, len(tokenizer.rx_voc.word2idx)))
         if config.graph:
             assert tokenizer is not None
             assert tokenizer.dx_voc is not None
@@ -94,7 +99,7 @@ class LitBert(pl.LightningModule):
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
 
-    def validation_epoch_end(self, outputs) -> None:
+    def validation_epoch_end(self, outputs):
         dx2dx_y_preds, rx2dx_y_preds, dx2rx_y_preds, rx2rx_y_preds, dx_y_trues, rx_y_trues = map(list,
                                                                                                  zip(*outputs))
 
@@ -114,13 +119,7 @@ class LitBert(pl.LightningModule):
         rx2rx = self.metric_report(
             np.concatenate(rx2rx_y_preds, axis=0), np.concatenate(rx_y_trues, axis=0))
         print('rx2rx')
-        print(rx2dx)
-
-
-class LitPretrain(LitBert):
-    def __init__(self, config: BertConfig, tokenizer, learning_rate, ):
-        super().__init__(config, tokenizer, learning_rate)
-        self.cls = SelfSupervisedHead(config, len(tokenizer.dx_voc.word2idx), len(tokenizer.rx_voc.word2idx))
+        print(rx2rx)
 
     def training_step(self, batch):
         inputs, dx_labels, rx_labels = batch
@@ -156,7 +155,37 @@ class LitPretrain(LitBert):
             rx2rx)
         return t2n(dx2dx), t2n(rx2dx), t2n(dx2rx), t2n(rx2rx), t2n(dx_labels), t2n(rx_labels)
 
+    def test_step(self, batch, batch_idx):
+        input_ids, dx_labels, rx_labels = batch
+        input_ids, dx_labels, rx_labels = input_ids.squeeze(
+        ), dx_labels.squeeze(), rx_labels.squeeze(dim=0)
+        token_types_ids = torch.cat([torch.zeros((1, input_ids.size(1))), torch.ones(
+            (1, input_ids.size(1)))], dim=0).long().to(input_ids.device)
+        token_types_ids = token_types_ids.repeat(
+            1 if input_ids.size(0)//2 == 0 else input_ids.size(0)//2, 1)
+        with torch.no_grad():
+            _, bert_pool = self.bert(input_ids, token_types_ids)
+        dx_bert_pool = self.dense[0](bert_pool[0])  # (adm, H)
+        rx_bert_pool = self.dense[1](bert_pool[1])  # (adm, H)
+        # mean and concat for rx prediction task
+        rx_logits = []
+        for i in range(rx_labels.size(0)):
+            # mean
+            dx_mean = torch.mean(dx_bert_pool[0:i+1, :], dim=0, keepdim=True)
+            rx_mean = torch.mean(rx_bert_pool[0:i+1, :], dim=0, keepdim=True)
+            # concat
+            concat = torch.cat(
+                [dx_mean, rx_mean, dx_bert_pool[i+1, :].unsqueeze(dim=0)], dim=-1)
+            rx_logits.append(self.cls(concat))
 
-class LitPredict(LitBert):
-    def __init__(self):
-        pass
+        rx_logits = torch.cat(rx_logits, dim=0)
+        loss = F.binary_cross_entropy_with_logits(rx_logits, rx_labels)
+        return t2n(torch.sigmoid(rx_logits)), t2n(rx_labels), loss
+
+    def test_epoch_end(self, outputs):
+        y_preds, y_trues, _ = map(list, zip(*outputs))
+        metrics = self.metric_report(np.concatenate(y_preds, axis=0), np.concatenate(y_trues, axis=0))
+        print('')
+        print('Metrics')
+        print(metrics)
+
