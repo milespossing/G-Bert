@@ -66,6 +66,7 @@ if __name__ == '__main__':
         accelerator='cpu' if args.no_cuda else 'gpu',
         max_epochs=args.num_train_epochs,
         default_root_dir=args.output_dir)
+    model.use_pretrain()
 
     if args.checkpoint is not None:
         trainer.fit(model, ehr_data, ckpt_path=os.path.join(args.output_dir, 'checkpoint.ckpt'))

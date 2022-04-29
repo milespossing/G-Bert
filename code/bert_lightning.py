@@ -1,6 +1,7 @@
 import pytorch_lightning as pl
 import numpy as np
 import torch
+import enum
 from torch import nn
 from torch.nn import functional as F
 from config import BertConfig
@@ -37,6 +38,10 @@ def compute_loss(dx2dx, rx2dx, dx2rx, rx2rx, dx_labels, rx_labels):
            F.binary_cross_entropy_with_logits(dx2rx, rx_labels) + \
            F.binary_cross_entropy_with_logits(rx2rx, rx_labels)
 
+class BertMode(enum.Enum):
+    Pretrain = 0
+    Predict = 1
+
 
 class LitBert(pl.LightningModule):
     def __init__(self, config: BertConfig, tokenizer, learning_rate):
@@ -65,8 +70,15 @@ class LitBert(pl.LightningModule):
 
         # multi-layers transformer blocks, deep network
         self.transformer_blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.num_hidden_layers)])
+        self.mode = None
 
         self.apply(self.init_bert_weights)
+
+    def use_pretrain(self):
+        self.mode = BertMode.Pretrain
+
+    def use_predict(self):
+        self.mode = BertMode.Predict
 
     def forward(self, x, token_type_ids):
         # attention masking for padded token
@@ -100,28 +112,31 @@ class LitBert(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
 
     def validation_epoch_end(self, outputs):
-        dx2dx_y_preds, rx2dx_y_preds, dx2rx_y_preds, rx2rx_y_preds, dx_y_trues, rx_y_trues = map(list,
-                                                                                                 zip(*outputs))
+        if self.mode == BertMode.Pretrain:
+            dx2dx_y_preds, rx2dx_y_preds, dx2rx_y_preds, rx2rx_y_preds, dx_y_trues, rx_y_trues = map(list,
+                                                                                                     zip(*outputs))
 
-        dx2dx = self.metric_report(
-            np.concatenate(dx2dx_y_preds, axis=0), np.concatenate(dx_y_trues, axis=0))
-        print('')
-        print('dx2dx')
-        print(dx2dx)
-        rx2dx = self.metric_report(
-            np.concatenate(rx2dx_y_preds, axis=0), np.concatenate(dx_y_trues, axis=0))
-        print('rx2dx')
-        print(rx2dx)
-        dx2rx = self.metric_report(
-            np.concatenate(dx2rx_y_preds, axis=0), np.concatenate(rx_y_trues, axis=0))
-        print('dx2rx')
-        print(dx2rx)
-        rx2rx = self.metric_report(
-            np.concatenate(rx2rx_y_preds, axis=0), np.concatenate(rx_y_trues, axis=0))
-        print('rx2rx')
-        print(rx2rx)
+            dx2dx = self.metric_report(
+                np.concatenate(dx2dx_y_preds, axis=0), np.concatenate(dx_y_trues, axis=0))
+            print('')
+            print('dx2dx')
+            print(dx2dx)
+            rx2dx = self.metric_report(
+                np.concatenate(rx2dx_y_preds, axis=0), np.concatenate(dx_y_trues, axis=0))
+            print('rx2dx')
+            print(rx2dx)
+            dx2rx = self.metric_report(
+                np.concatenate(dx2rx_y_preds, axis=0), np.concatenate(rx_y_trues, axis=0))
+            print('dx2rx')
+            print(dx2rx)
+            rx2rx = self.metric_report(
+                np.concatenate(rx2rx_y_preds, axis=0), np.concatenate(rx_y_trues, axis=0))
+            print('rx2rx')
+            print(rx2rx)
+        else:
+            raise NotImplementedError()
 
-    def training_step(self, batch):
+    def pretrain_training_step(self, batch):
         inputs, dx_labels, rx_labels = batch
         # TODO: Might need to sqeeze inputs here like in ./run_gbert.py:418
         inputs, dx_labels, rx_labels = inputs.squeeze(), dx_labels.squeeze(), rx_labels.squeeze(dim=0)
@@ -136,7 +151,13 @@ class LitBert(pl.LightningModule):
         # compute loss
         return compute_loss(dx2dx, rx2dx, dx2rx, rx2rx, dx_labels, rx_labels)
 
-    def validation_step(self, batch, batch_idx):
+    def training_step(self, batch):
+        if self.mode == BertMode.Pretrain:
+            return self.pretrain_training_step(batch)
+        else:
+            raise NotImplementedError()
+
+    def pretrain_validation_step(self, batch, batch_idx):
         """
         TODO: This returns a very small number right now. I should find a way to get the output of _all_ batches and
               compute the metrics from that point.
@@ -154,6 +175,13 @@ class LitBert(pl.LightningModule):
         dx2dx, rx2dx, dx2rx, rx2rx = torch.sigmoid(dx2dx), torch.sigmoid(rx2dx), torch.sigmoid(dx2rx), torch.sigmoid(
             rx2rx)
         return t2n(dx2dx), t2n(rx2dx), t2n(dx2rx), t2n(rx2rx), t2n(dx_labels), t2n(rx_labels)
+
+    def validation_step(self, batch, batch_idx):
+        if (self.mode == BertMode.Pretrain):
+            return self.pretrain_validation_step(batch, batch_idx)
+        else:
+            raise NotImplementedError()
+
 
     def test_step(self, batch, batch_idx):
         input_ids, dx_labels, rx_labels = batch
