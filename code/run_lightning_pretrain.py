@@ -9,6 +9,8 @@ import pytorch_lightning as pl
 from lightning_data_module import EHRDataModule
 from config import BertConfig
 from bert_lightning import LitBert
+from run_gbert import load_dataset
+from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler, Dataset
 
 
 def parse_args():
@@ -60,7 +62,7 @@ if __name__ == '__main__':
     config = BertConfig(
         vocab_size_or_config_json_file=len(tokenizer.vocab.word2idx))
     config.graph = args.graph
-    model = LitBert(config, tokenizer, args.learning_rate)
+    model = LitBert(config, tokenizer, ehr_data_test.tokenizer, args.learning_rate)
 
     trainer = pl.Trainer(
         accelerator='cpu' if args.no_cuda else 'gpu',
@@ -75,6 +77,8 @@ if __name__ == '__main__':
         trainer.save_checkpoint(os.path.join(args.output_dir, 'checkpoint.ckpt'))
 
     model.logger.save()
+    model.use_predict()
+    trainer.fit(model, ehr_data_test)
 
     # TODO: need to use a conditional saving mechanism like in run_pretraining.py:457
     #       this could be stored by the val_epoch_end routine

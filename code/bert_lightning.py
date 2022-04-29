@@ -44,18 +44,18 @@ class BertMode(enum.Enum):
 
 
 class LitBert(pl.LightningModule):
-    def __init__(self, config: BertConfig, tokenizer, learning_rate):
+    def __init__(self, config: BertConfig, tokenizer_pretrain, tokenizer_predict, learning_rate):
         super().__init__()
         self.learning_rate = learning_rate
         self.dense = nn.ModuleList([MappingHead(config), MappingHead(config)])
-        self.cls = SelfSupervisedHead(config, len(tokenizer.dx_voc.word2idx), len(tokenizer.rx_voc.word2idx))
-        self.cls_test = nn.Sequential(nn.Linear(3*config.hidden_size, 2*config.hidden_size),
-                                      nn.ReLU(),
-                                      nn.Linear(2*config.hidden_size, len(tokenizer.rx_voc.word2idx)))
+        self.cls_pretrain = SelfSupervisedHead(config, len(tokenizer_pretrain.dx_voc.word2idx), len(tokenizer_predict.rx_voc.word2idx))
+        self.cls_predict = nn.Sequential(nn.Linear(3 * config.hidden_size, 2 * config.hidden_size),
+                                         nn.ReLU(),
+                                         nn.Linear(2*config.hidden_size, len(tokenizer_predict.rx_voc_multi.word2idx)))
         if config.graph:
-            assert tokenizer is not None
-            assert tokenizer.dx_voc is not None
-            assert tokenizer.rx_voc is not None
+            assert tokenizer_pretrain is not None
+            assert tokenizer_pretrain.dx_voc is not None
+            assert tokenizer_pretrain.rx_voc is not None
 
         self.config = config
 
@@ -64,7 +64,7 @@ class LitBert(pl.LightningModule):
 
         # embedding for BERT, sum of positional, segment, token embeddings
         if config.graph:
-            self.embedding = FuseEmbeddings(config, tokenizer.dx_voc, tokenizer.rx_voc)
+            self.embedding = FuseEmbeddings(config, tokenizer_pretrain.dx_voc, tokenizer_pretrain.rx_voc)
         else:
             self.embedding = BertEmbeddings(config)
 
@@ -133,6 +133,13 @@ class LitBert(pl.LightningModule):
                 np.concatenate(rx2rx_y_preds, axis=0), np.concatenate(rx_y_trues, axis=0))
             print('rx2rx')
             print(rx2rx)
+        elif self.mode == BertMode.Predict:
+            y_pred, y_true = map(lambda a: list(a), zip(*outputs))
+            y_pred, y_true = torch.cat(y_pred), torch.cat(y_true)
+            metrics = self.metric_report(t2n(y_pred), t2n(y_true))
+            print('')
+            print(metrics)
+            return
         else:
             raise NotImplementedError()
 
@@ -147,13 +154,45 @@ class LitBert(pl.LightningModule):
         _, rx_bert_pool = self.forward(inputs[:, 1, :], torch.zeros(
             (inputs.size(0), inputs.size(2))).long().to(inputs.device))
 
-        dx2dx, rx2dx, dx2rx, rx2rx = self.cls(dx_bert_pool, rx_bert_pool)
+        dx2dx, rx2dx, dx2rx, rx2rx = self.cls_pretrain(dx_bert_pool, rx_bert_pool)
         # compute loss
         return compute_loss(dx2dx, rx2dx, dx2rx, rx2rx, dx_labels, rx_labels)
+
+    def predict_forward(self, input_ids, rx_labels):
+        token_types_ids = torch.cat([torch.zeros((1, input_ids.size(1))), torch.ones(
+            (1, input_ids.size(1)))], dim=0).long().to(input_ids.device)
+        token_types_ids = token_types_ids.repeat(
+            1 if input_ids.size(0)//2 == 0 else input_ids.size(0)//2, 1)
+        _, bert_pool = self.forward(input_ids, token_types_ids)
+        loss = 0
+        bert_pool = bert_pool.view(2, -1, bert_pool.size(1))  # (2, adm, H)
+        dx_bert_pool = self.dense[0](bert_pool[0])  # (adm, H)
+        rx_bert_pool = self.dense[1](bert_pool[1])  # (adm, H)
+        rx_logits = []
+        for i in range(rx_labels.size(0)):
+            # mean
+            dx_mean = torch.mean(dx_bert_pool[0:i+1, :], dim=0, keepdim=True)
+            rx_mean = torch.mean(rx_bert_pool[0:i+1, :], dim=0, keepdim=True)
+            # concat
+            concat = torch.cat(
+                [dx_mean, rx_mean, dx_bert_pool[i+1, :].unsqueeze(dim=0)], dim=-1)
+            rx_logits.append(self.cls_predict(concat))
+
+        return torch.cat(rx_logits, dim=0)
+
+    def predict_training_step(self, batch):
+        input_ids, dx_labels, rx_labels = batch
+        input_ids, dx_labels, rx_labels = input_ids.squeeze(
+            dim=0), dx_labels.squeeze(dim=0), rx_labels.squeeze(dim=0)
+        rx_logits = self.predict_forward(input_ids, rx_labels)
+        loss = F.binary_cross_entropy_with_logits(rx_logits, rx_labels)
+        return {'loss': loss, 'preds': rx_logits}
 
     def training_step(self, batch):
         if self.mode == BertMode.Pretrain:
             return self.pretrain_training_step(batch)
+        elif self.mode == BertMode.Predict:
+            return self.predict_training_step(batch)
         else:
             raise NotImplementedError()
 
@@ -171,42 +210,32 @@ class LitBert(pl.LightningModule):
         _, rx_bert_pool = self.forward(inputs[:, 1, :], torch.zeros(
             (inputs.size(0), inputs.size(2))).long().to(inputs.device))
 
-        dx2dx, rx2dx, dx2rx, rx2rx = self.cls(dx_bert_pool, rx_bert_pool)
+        dx2dx, rx2dx, dx2rx, rx2rx = self.cls_pretrain(dx_bert_pool, rx_bert_pool)
         dx2dx, rx2dx, dx2rx, rx2rx = torch.sigmoid(dx2dx), torch.sigmoid(rx2dx), torch.sigmoid(dx2rx), torch.sigmoid(
             rx2rx)
         return t2n(dx2dx), t2n(rx2dx), t2n(dx2rx), t2n(rx2rx), t2n(dx_labels), t2n(rx_labels)
 
+    def predict_validation_step(self, batch):
+        input_ids, dx_labels, rx_labels = batch
+        input_ids, dx_labels, rx_labels = input_ids.squeeze(
+            dim=0), dx_labels.squeeze(dim=0), rx_labels.squeeze(dim=0)
+        rx_logits = self.predict_forward(input_ids, rx_labels)
+        return torch.sigmoid(rx_logits), rx_labels
+
+
     def validation_step(self, batch, batch_idx):
-        if (self.mode == BertMode.Pretrain):
+        if self.mode == BertMode.Pretrain:
             return self.pretrain_validation_step(batch, batch_idx)
+        elif self.mode == BertMode.Predict:
+            return self.predict_validation_step(batch)
         else:
             raise NotImplementedError()
 
 
     def test_step(self, batch, batch_idx):
         input_ids, dx_labels, rx_labels = batch
-        input_ids, dx_labels, rx_labels = input_ids.squeeze(
-        ), dx_labels.squeeze(), rx_labels.squeeze(dim=0)
-        token_types_ids = torch.cat([torch.zeros((1, input_ids.size(1))), torch.ones(
-            (1, input_ids.size(1)))], dim=0).long().to(input_ids.device)
-        token_types_ids = token_types_ids.repeat(
-            1 if input_ids.size(0)//2 == 0 else input_ids.size(0)//2, 1)
-        with torch.no_grad():
-            _, bert_pool = self.forward(input_ids, token_types_ids)
-        dx_bert_pool = self.dense[0](bert_pool[0])  # (adm, H)
-        rx_bert_pool = self.dense[1](bert_pool[1])  # (adm, H)
-        # mean and concat for rx prediction task
-        rx_logits = []
-        for i in range(rx_labels.size(0)):
-            # mean
-            dx_mean = torch.mean(dx_bert_pool[0:i+1, :], dim=0, keepdim=True)
-            rx_mean = torch.mean(rx_bert_pool[0:i+1, :], dim=0, keepdim=True)
-            # concat
-            concat = torch.cat(
-                [dx_mean, rx_mean, dx_bert_pool[i+1, :].unsqueeze(dim=0)], dim=-1)
-            rx_logits.append(self.cls(concat))
-
-        rx_logits = torch.cat(rx_logits, dim=0)
+        input_ids, dx_labels, rx_labels = input_ids.squeeze(), dx_labels.squeeze(), rx_labels.squeeze(dim=0)
+        rx_logits = self.predict_forward(input_ids, rx_labels)
         loss = F.binary_cross_entropy_with_logits(rx_logits, rx_labels)
         return t2n(torch.sigmoid(rx_logits)), t2n(rx_labels), loss
 
