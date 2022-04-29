@@ -52,7 +52,9 @@ if __name__ == '__main__':
 
     print("Loading Dataset")
     ehr_data = EHRDataModule(is_pretrain=True, data_dir='../data', batch_size=64)
+    ehr_data_test = EHRDataModule(is_pretrain=False, data_dir='../data', batch_size=64)
     ehr_data.setup()
+    ehr_data_test.setup()
     tokenizer = ehr_data.tokenizer
 
     config = BertConfig(
@@ -78,7 +80,7 @@ if __name__ == '__main__':
 
     print('testing...')
 
-    trainer.test(model, ehr_data)
+    trainer.test(model, ehr_data_test)
 
     with open(os.path.join(args.output_dir, 'bert_config.json'), 'w', encoding='utf-8') as fout:
         fout.write(model.config.to_json_string())

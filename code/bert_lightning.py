@@ -164,7 +164,7 @@ class LitBert(pl.LightningModule):
         token_types_ids = token_types_ids.repeat(
             1 if input_ids.size(0)//2 == 0 else input_ids.size(0)//2, 1)
         with torch.no_grad():
-            _, bert_pool = self.bert(input_ids, token_types_ids)  # todo: reference to the module
+            _, bert_pool = self.forward(input_ids, token_types_ids)
         dx_bert_pool = self.dense[0](bert_pool[0])  # (adm, H)
         rx_bert_pool = self.dense[1](bert_pool[1])  # (adm, H)
         # mean and concat for rx prediction task
