@@ -9,6 +9,7 @@ import pytorch_lightning as pl
 from lightning_data_module import EHRDataModule
 from config import BertConfig
 from bert_lightning import LitBert
+from bert_lightning_2 import LitBertPretrain, LitBertPredict
 from run_gbert import load_dataset
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler, Dataset
 
@@ -30,7 +31,8 @@ def parse_args():
                         help="The output directory where the model checkpoints will be written.")
     parser.add_argument("--checkpoint",
                         help="checkpoint file (*.ckpt) to load from",
-                        type=str,
+                        action='store_true',
+                        default=False,
                         required=False)
     parser.add_argument("--no_cuda",
                         action='store_true',
@@ -62,22 +64,25 @@ if __name__ == '__main__':
     config = BertConfig(
         vocab_size_or_config_json_file=len(tokenizer.vocab.word2idx))
     config.graph = args.graph
-    model = LitBert(config, tokenizer, ehr_data_test.tokenizer, args.learning_rate)
 
     trainer = pl.Trainer(
         accelerator='cpu' if args.no_cuda else 'gpu',
         max_epochs=args.num_train_epochs,
         default_root_dir=args.output_dir)
-    model.use_pretrain()
+    # model.use_pretrain()
 
-    if args.checkpoint is not None:
-        trainer.fit(model, ehr_data, ckpt_path=os.path.join(args.output_dir, 'checkpoint.ckpt'))
-    else:
+    if not args.checkpoint: # don't use the checkpoint
+        model = LitBertPretrain(config, tokenizer, args.learning_rate)
         trainer.fit(model, ehr_data)
         trainer.save_checkpoint(os.path.join(args.output_dir, 'checkpoint.ckpt'))
 
+    predict_model = LitBertPredict.load_from_checkpoint(os.path.join(args.output_dir, 'checkpoint.ckpt'),
+                                                        config=config,
+                                                        tokenizer=ehr_data_test.tokenizer,
+                                                        learning_rate=args.learning_rate)
+    trainer.fit(predict_model, ehr_data_test)
+
     model.logger.save()
-    model.use_predict()
     trainer.fit(model, ehr_data_test)
 
     # TODO: need to use a conditional saving mechanism like in run_pretraining.py:457
