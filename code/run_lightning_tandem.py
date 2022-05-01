@@ -24,6 +24,10 @@ def parse_arguments():
     # Required parameters
     parser.add_argument("--model_name", default='GBert-lightning', type=str, required=False,
                         help="model name")
+    parser.add_argument("--enable_progress_bar",
+                        default='True',
+                        type=str,
+                        choices=('True', 'False'))
     parser.add_argument("--data_dir",
                         default='../data',
                         type=str,
@@ -56,6 +60,10 @@ def parse_arguments():
                         help="The maximum total input sequence length after WordPiece tokenization. \n"
                              "Sequences longer than this will be truncated, and sequences shorter \n"
                              "than this will be padded.")
+    parser.add_argument("--no_pretrain",
+                        default=False,
+                        action='store_true',
+                        help="Don't do the pretrain step")
     parser.add_argument("--do_train",
                         default=False,
                         action='store_true',
@@ -81,7 +89,7 @@ def parse_arguments():
                         type=int,
                         help="Total number of training epochs to perform.")
     parser.add_argument("--num_train_repeats",
-                        default=15,
+                        default=1,
                         type=int,
                         help="Total number of pretrain + predict train repeats.")
     parser.add_argument("--no_cuda",
@@ -130,18 +138,24 @@ if __name__ == '__main__':
             accelerator='cpu' if args.no_cuda else 'gpu',
             max_epochs=args.num_train_epochs,
             logger=LoggerCollection([tb_logger_pretrain, screen]),
-            default_root_dir='../saved/lightning')
-        model.set_mode(BertMode.Pretrain)
-        trainer.fit(model, ehr_data_pretrain)
-        trainer.test(model, ehr_data_pretrain)
-        trainer.logger.save()
+            default_root_dir='../saved/lightning',
+            enable_progress_bar=args.enable_progress_bar == 'True')
+        if not args.no_pretrain:
+            model.set_mode(BertMode.Pretrain)
+            trainer.fit(model, ehr_data_pretrain)
+            trainer.test(model, ehr_data_pretrain)
+            trainer.logger.save()
+        else:
+            logger.info('No pretrain')
         model.set_mode(BertMode.Predict)
         trainer = pl.Trainer(
             accelerator='cpu' if args.no_cuda else 'gpu',
             max_epochs=args.num_train_epochs,
             logger=LoggerCollection([tb_logger_predict, screen]),
-            default_root_dir='../saved/lightning')
-        trainer.fit(model, ehr_data_predict)
+            default_root_dir='../saved/lightning',
+            enable_progress_bar=args.enable_progress_bar == 'True')
+        if args.do_train:
+            trainer.fit(model, ehr_data_predict)
         trainer.test(model, ehr_data_predict)
         trainer.logger.save()
 
