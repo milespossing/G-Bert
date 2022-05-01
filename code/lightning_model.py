@@ -68,6 +68,7 @@ class LitGBert(pl.LightningModule, ):
         # todo refer to self.bert not to a new copy
         # self.transformer_blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.num_hidden_layers)])
         self.mode = None
+        self.max_metric = 0
         self.apply(self.bert.init_bert_weights)
 
     def set_mode(self, mode: BertMode):
@@ -152,6 +153,7 @@ class LitGBert(pl.LightningModule, ):
             for cat_key in acc_container:
                 for metric_key in acc_container[cat_key]:
                     self.log(f"val_{cat_key}_{metric_key}", acc_container[cat_key][metric_key])
+            self.log(f"val_loss", LitGBert.compute_pretrain_loss(dx2dx, rx2dx, dx2rx, rx2rx, dx_labels, rx_labels))
         elif self.mode == BertMode.Predict:
             input_ids, rx_labels = input_ids.squeeze(dim=0), rx_labels.squeeze(dim=0)
             n_rx_labels = rx_labels.size(0)

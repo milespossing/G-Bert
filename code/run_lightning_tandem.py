@@ -5,17 +5,13 @@ from __future__ import print_function
 import os
 import logging
 import argparse
-import random
-import copy
-
-import numpy as np
-import pandas as pd
-import torch
 import pytorch_lightning as pl
+from loggers import ScreenLogger
+from pytorch_lightning.loggers import TensorBoardLogger, LoggerCollection
+from pytorch_lightning.callbacks import ModelCheckpoint
 from config import BertConfig
 from lightning_model import LitGBert, BertMode
 from lightning_data_module import EHRDataModule
-
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
@@ -100,6 +96,7 @@ def parse_arguments():
     args.output_dir = os.path.join(args.output_dir, args.model_name)
     return args
 
+
 if __name__ == '__main__':
     args = parse_arguments()
     pl.seed_everything(args.seed)
@@ -109,8 +106,12 @@ if __name__ == '__main__':
     ehr_data_predict = EHRDataModule(is_pretrain=False, data_dir='../data', batch_size=1)
     ehr_data_pretrain.setup()
     ehr_data_predict.setup()
+    checkpoint_callback = ModelCheckpoint(dirpath=os.path.join(args.output_dir, 'checkpoints'),
+                                          save_top_k=2,
+                                          save_last=True,
+                                          monitor='val_rx2rx_prauc')
 
-    assert ehr_data_pretrain.tokenizer.vocab.word2idx == ehr_data_predict.tokenizer.vocab.word2idx,\
+    assert ehr_data_pretrain.tokenizer.vocab.word2idx == ehr_data_predict.tokenizer.vocab.word2idx, \
         'Pretrain and predict data-loaders are not using the same vocabulary!'
 
     # todo: set the hyperparameter search here
@@ -119,23 +120,29 @@ if __name__ == '__main__':
     # todo 'if args.use_pretrain:'
     model = LitGBert(config, ehr_data_pretrain.tokenizer, ehr_data_predict.tokenizer, args.learning_rate,
                      args.threshold)
+    tb_logger_pretrain = TensorBoardLogger(args.output_dir, name='pretrain')
+    tb_logger_predict = TensorBoardLogger(args.output_dir, name='predict')
+    screen = ScreenLogger()
 
     # TODO: Save the model here
     for i_tandem_train in range(args.num_train_repeats):
         trainer = pl.Trainer(
             accelerator='cpu' if args.no_cuda else 'gpu',
             max_epochs=args.num_train_epochs,
+            logger=LoggerCollection([tb_logger_pretrain, screen]),
             default_root_dir='../saved/lightning')
         model.set_mode(BertMode.Pretrain)
         trainer.fit(model, ehr_data_pretrain)
         trainer.test(model, ehr_data_pretrain)
+        trainer.logger.save()
         model.set_mode(BertMode.Predict)
         trainer = pl.Trainer(
             accelerator='cpu' if args.no_cuda else 'gpu',
             max_epochs=args.num_train_epochs,
+            logger=LoggerCollection([tb_logger_predict, screen]),
             default_root_dir='../saved/lightning')
         trainer.fit(model, ehr_data_predict)
         trainer.test(model, ehr_data_predict)
-        model.logger.save()
+        trainer.logger.save()
 
     print('done')
