@@ -47,7 +47,7 @@ def main(hparams):
     dict_args = vars(hparams)
     seed_everything(dict_args['seed'], workers=True)
     exp_mnr = ExperimentManager(hparams)
-    tb_logger = TensorBoardLogger(dict_args['output_dir'], name="gbert_tandem")
+    tb_logger = TensorBoardLogger(dict_args['output_dir'], name="gbert_05_03")
     hparams.logger = tb_logger
     hparams.callbacks = [exp_mnr]
     trainer = Trainer.from_argparse_args(hparams)

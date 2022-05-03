@@ -5,7 +5,6 @@ from pytorch_lightning.trainer.states import RunningStage
 from torch import nn
 from torch.nn import functional as F
 
-from lightning_data_module import Tokenizer
 from config import BertConfig
 from bert_models import FuseEmbeddings, BertEmbeddings, TransformerBlock, LayerNorm, BERT
 from predictive_models import SelfSupervisedHead, MappingHead
