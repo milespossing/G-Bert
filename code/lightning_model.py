@@ -1,10 +1,9 @@
-from typing import Dict, Tuple, Union
+from typing import Tuple, Union
 import enum
-
 from pytorch_lightning.trainer.states import RunningStage
 from torch import nn
 from torch.nn import functional as F
-
+from torch.optim.lr_scheduler import ExponentialLR
 from config import BertConfig
 from bert_models import FuseEmbeddings, BertEmbeddings, TransformerBlock, LayerNorm, BERT
 from predictive_models import SelfSupervisedHead, MappingHead
@@ -112,7 +111,7 @@ class DatasetPretrain(EHRDatasetTemplate):
         super(DatasetPretrain, self).__init__(data_pd, tokenizer, max_seq_len)
 
     @classmethod
-    def __transform_data__(cls, data) -> List[List[List]]:  # todo figure out return type
+    def __transform_data__(cls, data) -> List[List[List]]:
         """
         :param data: raw data form
         :return: {subject_id, [adm, 2, codes]},
@@ -126,10 +125,10 @@ class DatasetPretrain(EHRDatasetTemplate):
     def __getitem__(self, item):
         adm = copy.deepcopy(self.data[item])
 
-        def fill_to_max(l, seq):
-            while len(l) < seq:
-                l.append('[PAD]')
-            return l
+        def fill_to_max(lst: List, seq):
+            while len(lst) < seq:
+                lst.append('[PAD]')
+            return lst
 
         """y
         """
@@ -147,7 +146,6 @@ class DatasetPretrain(EHRDatasetTemplate):
 
         """extract input and output tokens
         """
-        # random_word  # todo: figure out
         input_tokens = []  # (2*max_len)
         input_tokens.extend(
             ['[CLS]'] + fill_to_max(list(adm[0]), self.seq_len - 1))
@@ -157,14 +155,6 @@ class DatasetPretrain(EHRDatasetTemplate):
         """convert tokens to id
         """
         input_ids = self.tokenizer.convert_tokens_to_ids(input_tokens)
-
-        # todo: decide about logging
-        # if cur_id < 5:
-        #     logger.info("*** Example ***")
-        #     logger.info("input tokens: %s" % " ".join(
-        #         [str(x) for x in input_tokens]))
-        #     logger.info("input_ids: %s" %
-        #                 " ".join([str(x) for x in input_ids]))
 
         cur_tensors = (torch.tensor(input_ids, dtype=torch.long).view(-1, self.seq_len),
                        torch.tensor(y_dx, dtype=torch.float),
@@ -217,10 +207,10 @@ class DatasetPrediction(EHRDatasetTemplate):
     def __getitem__(self, item):
         subject_id = list(self.data.keys())[item]
 
-        def fill_to_max(l, seq):
-            while len(l) < seq:
-                l.append('[PAD]')
-            return l
+        def fill_to_max(lst: List, seq):
+            while len(lst) < seq:
+                lst.append('[PAD]')
+            return lst
 
         """extract input and output tokens
         """
@@ -259,15 +249,6 @@ class DatasetPrediction(EHRDatasetTemplate):
                 map(lambda x: self.tokenizer.rx_voc_multi.word2idx[x], tokens))] = 1
             output_rx_labels.append(tmp_labels)
 
-        # todo: decide about logging
-        # if cur_id < 5:
-        #     logger.info("*** Example ***")
-        #     logger.info("subject_id: %s" % subject_id)
-        #     logger.info("input tokens: %s" % " ".join(
-        #         [str(x) for x in input_tokens]))
-        #     logger.info("input_ids: %s" %
-        #                 " ".join([str(x) for x in input_ids]))
-
         # todo: move assertion out of the loop
         # assert len(input_ids) == (self.seq_len *
         #                           2 * len(self.data[subject_id]))
@@ -282,13 +263,15 @@ class DatasetPrediction(EHRDatasetTemplate):
 
 
 class EHRDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str = "./data", max_seq_len=55, pretrain_batch_size=10, use_single=True):
+    def __init__(self, data_dir: str = "./data", max_seq_len=55, pretrain_batch_size=10, use_single=True,
+                 shuffle_inds=False):
         super().__init__()
         self.train_dataset, self.eval_dataset, self.test_dataset = (None, None, None)
         self.data_dir = data_dir
         self.max_seq_len = max_seq_len
         self.pretrain_batch_size = pretrain_batch_size
         self.use_single = use_single
+        self.shuffle_inds = shuffle_inds
         # load tokenizer
         self.tokenizer_pretrain = Tokenizer(self.data_dir, True)
         self.tokenizer_predict = Tokenizer(self.data_dir, False)
@@ -311,19 +294,27 @@ class EHRDataModule(pl.LightningDataModule):
         parser.add_argument("--use_single",
                             action='store_true',
                             help="Whether to run on the dev set.")
+        parser.add_argument("--shuffle_inds",
+                            action='store_true',
+                            help="Whether to run on the dev set.")
         return parser
 
     def prepare_data(self):
-        # TODO: here we download & save data (part of load_dataset from orig code)
+        # here we download & save data (part of load_dataset from orig code)
         pass
 
-    def setup(self, stage: Optional[RunningStage]):
-        # TODO: data operations you might want to perform on every GPU (here goes most of orig code)
+    def setup(self, stage: Optional[str] = None):
+        # data operations you might want to perform on every GPU (here goes most of orig code)
 
         # load train, eval, test index from files
-        ids_file = [os.path.join(self.data_dir, 'train-id.txt'),
-                    os.path.join(self.data_dir, 'eval-id.txt'),
-                    os.path.join(self.data_dir, 'test-id.txt')]
+        if self.shuffle_inds:
+            ids_file = [os.path.join(self.data_dir, 'train-id_shuffle.txt'),
+                        os.path.join(self.data_dir, 'eval-id_shuffle.txt'),
+                        os.path.join(self.data_dir, 'test-id_shuffle.txt')]
+        else:
+            ids_file = [os.path.join(self.data_dir, 'train-id.txt'),
+                        os.path.join(self.data_dir, 'eval-id.txt'),
+                        os.path.join(self.data_dir, 'test-id.txt')]
 
         def load_ids(data, file_name):
             """
@@ -354,7 +345,8 @@ class EHRDataModule(pl.LightningDataModule):
         else:  # Prediction task
             data_multi = pd.read_pickle(os.path.join(self.data_dir, 'data-multi-visit.pkl'))
             self.train_dataset, self.eval_dataset, self.test_dataset = \
-                tuple(map(lambda x: DatasetPrediction(load_ids(data_multi, x), self.tokenizer_predict, self.max_seq_len), ids_file))
+                tuple(map(lambda x: DatasetPrediction(load_ids(data_multi, x),
+                                                      self.tokenizer_predict, self.max_seq_len), ids_file))
         pass
 
     def train_dataloader(self, num_workers=6):
@@ -377,6 +369,7 @@ class EHRDataModule(pl.LightningDataModule):
                           batch_size=batch_size,
                           num_workers=num_workers)
 
+
 def metric_report(threshold=0.5):
     def get_metrics(y_pred, y_true):
         y_prob = y_pred.copy()
@@ -384,7 +377,7 @@ def metric_report(threshold=0.5):
         y_pred[y_pred <= threshold] = 0
         ja, prauc, avg_p, avg_r, avg_f1 = multi_label_metric(
             y_true, y_pred, y_prob)
-        return {'jaccard':ja, 'f1': avg_f1, 'prauc':prauc}
+        return {'jaccard': ja, 'f1': avg_f1, 'prauc': prauc}
 
     return lambda pred, true: get_metrics(pred, true)
 
@@ -397,10 +390,12 @@ class BertMode(enum.Enum):
 class LitGBert(pl.LightningModule):
     def __init__(self, args: Union[Namespace, ArgumentParser]):
         super().__init__()
-        # equivalent
-        self.save_hyperparameters(args)
-        self.ehr_data = EHRDataModule(args.data_dir, args.max_seq_length, args.pretrain_batch_size, args.use_single)
-        config = BertConfig(len(self.ehr_data.tokenizer_pretrain.vocab.word2idx), graph=args.graph)
+        self.ehr_data = EHRDataModule(args.data_dir, args.max_seq_length, args.pretrain_batch_size, args.use_single,
+                                      args.shuffle_inds)
+        config = BertConfig(len(self.ehr_data.tokenizer_pretrain.vocab.word2idx),
+                            num_attention_heads=args.num_attention_heads,
+                            num_hidden_layers=args.num_hidden_layers,
+                            graph=args.graph)
         assert self.ehr_data.tokenizer_predict.dx_voc.word2idx == self.ehr_data.tokenizer_pretrain.dx_voc.word2idx
         assert self.ehr_data.tokenizer_predict.rx_voc.word2idx == self.ehr_data.tokenizer_pretrain.rx_voc.word2idx
         self.dx_voc_size = len(self.ehr_data.tokenizer_pretrain.dx_voc.word2idx)
@@ -416,37 +411,36 @@ class LitGBert(pl.LightningModule):
             nn.Linear(3 * config.hidden_size, 2 * config.hidden_size), nn.ReLU(),
             nn.Linear(2 * config.hidden_size, len(self.ehr_data.tokenizer_predict.rx_voc_multi.word2idx)))
 
-        # todo verify this part
         # embedding for BERT, sum of positional, segment, token embeddings
         if config.graph:
             assert self.ehr_data.tokenizer_pretrain is not None
             assert self.ehr_data.tokenizer_pretrain.dx_voc is not None
             assert self.ehr_data.tokenizer_pretrain.rx_voc is not None
+            print("!! we didn't verify the graph embeddings, please reconsider !!")
             self.embedding = FuseEmbeddings(config, self.ehr_data.tokenizer_pretrain.dx_voc,
                                             self.ehr_data.tokenizer_pretrain.rx_voc)
         else:
             self.embedding = BertEmbeddings(config)
 
         self.learning_rate = args.learning_rate
+        self.lr_exp_decay = args.lr_exp_decay
         self.metric_report = metric_report(args.threshold)
 
-        # multi-layers transformer blocks, deep network
-        # todo refer to self.bert not to a new copy
-        # self.transformer_blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.num_hidden_layers)])
         self.mode = None
         self.max_metric = 0
         self.apply(self.bert.init_bert_weights)
+        self.args = args
 
     @staticmethod
     def add_model_specific_args(parser: ArgumentParser) -> ArgumentParser:
-        parser.add_argument("--use_pretrain",
-                            default=False,
-                            action='store_true',
-                            help="if use ontology embedding")
         parser.add_argument("--learning_rate",
                             default=5e-4,
                             type=float,
                             help="The initial learning rate for Adam.")
+        parser.add_argument("--lr_exp_decay",
+                            default=1.0,
+                            type=float,
+                            help="The decay rate factor.")
         parser.add_argument("--graph",
                             default=False,
                             action='store_true',
@@ -455,6 +449,14 @@ class LitGBert(pl.LightningModule):
                             default=0.3,
                             type=float,
                             help="threshold for metrics eval.")
+        parser.add_argument("--num_attention_heads",
+                            default=4,
+                            type=int,
+                            help="Attention heads in BERT model.")
+        parser.add_argument("--num_hidden_layers",
+                            default=2,
+                            type=int,
+                            help="Hidden layers in model.")
         return parser
 
     def set_mode(self, mode: BertMode):
@@ -462,7 +464,12 @@ class LitGBert(pl.LightningModule):
         self.ehr_data.mode = mode
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        if 0 < self.lr_exp_decay < 1:
+            scheduler = ExponentialLR(optimizer, self.lr_exp_decay)
+            return [optimizer], [scheduler]
+        else:
+            return optimizer
 
     @staticmethod
     def compute_pretrain_loss(dx2dx, rx2dx, dx2rx, rx2rx, dx_labels, rx_labels):
@@ -472,13 +479,15 @@ class LitGBert(pl.LightningModule):
                F.binary_cross_entropy_with_logits(rx2rx, rx_labels)
 
     def pretrain_fw(self, inputs) -> Tuple:
-        _, dx_bert_pool = self.bert(inputs[:, 0, :], torch.zeros((inputs.size(0), inputs.size(2))).long().to(inputs.device))
-        _, rx_bert_pool = self.bert(inputs[:, 1, :], torch.zeros((inputs.size(0), inputs.size(2))).long().to(inputs.device))
+        _, dx_bert_pool = self.bert(inputs[:, 0, :],
+                                    torch.zeros((inputs.size(0), inputs.size(2))).long().to(inputs.device))
+        _, rx_bert_pool = self.bert(inputs[:, 1, :],
+                                    torch.zeros((inputs.size(0), inputs.size(2))).long().to(inputs.device))
         return self.cls_pretrain(dx_bert_pool, rx_bert_pool)
 
-    def predict_fw(self, input_ids, n_rx_labels:int):
-        token_types_ids = torch.cat([torch.zeros((1, input_ids.size(1))), torch.ones(
-            (1, input_ids.size(1)))], dim=0).long().to(input_ids.device)
+    def predict_fw(self, input_ids, n_rx_labels: int):
+        token_types_ids = torch.cat([torch.zeros((1, input_ids.size(1))),
+                                     torch.ones((1, input_ids.size(1)))], dim=0).long().to(input_ids.device)
         token_types_ids = token_types_ids.repeat(
             1 if input_ids.size(0) // 2 == 0 else input_ids.size(0) // 2, 1)
         # bert_pool: (2*adm, H)
@@ -508,6 +517,10 @@ class LitGBert(pl.LightningModule):
             return self.predict_fw(input_ids, n_rx_labels)
         else:
             raise NotImplementedError()
+
+    def on_train_start(self):
+        self.logger.log_hyperparams(self.args, {"hp/jaccard_val": 0, "hp/f1_val": 0, "hp/prauc_val": 0,
+                                                "hp/jaccard_test": 0, "hp/f1_test": 0, "hp/prauc_test": 0})
 
     def training_step(self, batch):
         input_ids, dx_labels, rx_labels = batch
@@ -539,7 +552,9 @@ class LitGBert(pl.LightningModule):
             for cat_key in acc_container:
                 for metric_key in acc_container[cat_key]:
                     self.log(f"val_{cat_key}_{metric_key}", acc_container[cat_key][metric_key])
-            self.log(f"val_loss", LitGBert.compute_pretrain_loss(dx2dx, rx2dx, dx2rx, rx2rx, dx_labels, rx_labels))
+            self.log(f"val_pretrain_loss",
+                     LitGBert.compute_pretrain_loss(dx2dx, rx2dx, dx2rx, rx2rx, dx_labels, rx_labels))
+
         elif self.mode == BertMode.Predict:
             input_ids, rx_labels = input_ids.squeeze(dim=0), rx_labels.squeeze(dim=0)
             n_rx_labels = rx_labels.size(0)
@@ -547,6 +562,7 @@ class LitGBert(pl.LightningModule):
             metrics = self.metric_report(t2n(rx_probs), t2n(rx_labels))
             for metric_key in metrics:
                 self.log(f"val_predict_{metric_key}", metrics[metric_key])
+                self.log(f"hp/{metric_key}_val", metrics[metric_key])
         else:
             raise NotImplementedError()
 
@@ -570,6 +586,6 @@ class LitGBert(pl.LightningModule):
             metrics = self.metric_report(t2n(rx_probs), t2n(rx_labels))
             for metric_key in metrics:
                 self.log(f"test_predict_{metric_key}", metrics[metric_key])
+                self.log(f"hp/{metric_key}_test", metrics[metric_key])
         else:
             raise NotImplementedError()
-

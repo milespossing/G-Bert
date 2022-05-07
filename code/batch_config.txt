@@ -1,11 +1,1 @@
---use_pretrain --do_train --do_eval --do_test_predict --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 5.0e-4 --toggle_mode_every_n_steps 5 --max_epochs 75
---use_pretrain --do_train --do_eval --do_test_predict --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 5.0e-4 --toggle_mode_every_n_steps 10 --max_epochs 80
---use_pretrain --do_train --do_eval --do_test_predict --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 5.0e-4 --toggle_mode_every_n_steps 20 --max_epochs 100
---use_pretrain --do_train --do_eval --do_test_predict --gpus 1 --log_every_n_steps 1 --learning_rate 5.0e-4 --toggle_mode_every_n_steps 20 --max_epochs 100
---use_pretrain --do_train --do_eval --do_test_predict --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 5.0e-5 --toggle_mode_every_n_steps 5 --max_epochs 20
---use_pretrain --do_train --do_eval --do_test_predict --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-4 --toggle_mode_every_n_steps 5 --max_epochs 20
---use_pretrain --do_train --do_eval --do_test_predict --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 5.0e-4 --toggle_mode_every_n_steps 5 --max_epochs 20
---use_pretrain --do_train --do_eval --do_test_predict --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --toggle_mode_every_n_steps 5 --max_epochs 20
-
-
-
+-trn -evl -tp --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --lr_exp_decay=0.7 -tg_int 5 --max_epochs 30 --seed 1203 --output_dir ../saved/shuffle_ids --exp_name unshuffled
