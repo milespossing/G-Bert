@@ -7,7 +7,7 @@ from experiment_manager import main as exp_main, collect_all_args
 
 
 if __name__ == "__main__":
-    config_str = '--shuffle_inds -trn -evl --tp --use_single --gpus 1 --log_every_n_steps 1 --tg_int 5 ' \
+    config_str = '--shuffle_inds -trn -evl -tp --use_single --gpus 1 --log_every_n_steps 1 -tg_int 5 ' \
                  '--max_epochs 20 --learning_rate 1.0e-3 --lr_exp_decay=0.7 --output_dir ../saved/bert_tune'
     for num_hidden_layers in [2, 3]:
         for num_attention_heads in [3, 4, 5]:

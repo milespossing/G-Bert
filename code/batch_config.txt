@@ -1,1 +1,8 @@
+--shuffle_inds -trn -evl -tp --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --lr_exp_decay=0.7 -tg_int 5 --max_epochs 30 --seed 1203 --output_dir ../saved/consistency --exp_name seed_1203
+--shuffle_inds -trn -evl -tp --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --lr_exp_decay=0.7 -tg_int 5 --max_epochs 30 --seed 1203 --output_dir ../saved/consistency --exp_name seed_1204
+--shuffle_inds -trn -evl -tp --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --lr_exp_decay=0.7 -tg_int 5 --max_epochs 30 --seed 1203 --output_dir ../saved/consistency --exp_name seed_1205
+--shuffle_inds -trn -evl -tp --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --lr_exp_decay=0.7 -tg_int 5 --max_epochs 30 --seed 1203 --output_dir ../saved/shuffle_ids --exp_name shuffled
 -trn -evl -tp --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --lr_exp_decay=0.7 -tg_int 5 --max_epochs 30 --seed 1203 --output_dir ../saved/shuffle_ids --exp_name unshuffled
+--shuffle_inds -trn -evl -tp --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --lr_exp_decay=0.7 -tg_int 5 --max_epochs 30 --output_dir ../saved/ablation --exp_name baseline
+--shuffle_inds -trn -evl -tp --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --lr_exp_decay=0.7 -tg_int 5 --max_epochs 30 --output_dir ../saved/ablation --exp_name no_single
+--shuffle_inds -trn -evl -tp --use_single --gpus 1 --log_every_n_steps 1 --learning_rate 1.0e-3 --lr_exp_decay=0.7 -tg_int -1 --max_epochs 30 --output_dir ../saved/ablation --exp_name no_pretrain

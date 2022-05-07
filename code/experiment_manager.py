@@ -45,7 +45,7 @@ class ExperimentManager(Callback):
         parser.add_argument("--exp_name",
                             default='my_experiment',
                             type=str,
-                            required=True,
+                            required=False,
                             help="The experiment name for logging.")
         parser.add_argument("--data_dir",
                             default='../data',
